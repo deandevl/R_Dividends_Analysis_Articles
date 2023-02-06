@@ -1,0 +1,241 @@
+---
+title: "Dividend Discovery"
+author: "Rick Dean"
+format: 
+  html:
+    toc: false
+    toc-depth: 4
+    toc-location: "right"
+    number-sections: true
+    number-offset: 0
+    self-contained: true
+    smooth-scroll: true
+    code-fold: true
+    code-block-bg: "#f1f3f5"
+    code-block-border-left: "#31BAE9"
+    code-overflow: wrap
+    tbl-cap-location: "bottom"
+    fig-width: 12
+    fig-height: 6
+    fig-align: "center"
+    fig-cap-location: "bottom"
+    css: ../style.css
+    link-external-newwindow: true
+    abstract-title: "Abstract"
+    abstract: "The following notes/R scripts were inspired from an article [Dividend Discovery](http://www.reproduciblefinance.com/2019/07/10/dividend-discovery/) by Jonathan Regenstein."
+---
+
+```{r}
+#| warning: false
+#| message: false
+
+library(data.table)
+library(magrittr)
+library(quantmod)
+library(ggplot2)
+library(RplotterPkg)
+library(RstocksPkg)
+```
+
+::: note
+Be aware that this application has an internet request for dividend data that will take time to complete.
+:::
+
+# Dividend Discovery
+
+## The data
+
+Get the ticker symbols for companies in the Dow Industrial Average Index(DOW30).
+```{r}
+DOW_30_tickers <- RstocksPkg::get_dow30_symbols()
+```
+
+Get historic dividends for the DOW30 between "1990-01-01" and "2022-12-31":
+```{r}
+#| message: false
+#| warning: false
+
+dividends_dt <- RstocksPkg::get_dividends(
+  symbols = DOW_30_tickers$ticker,
+  from = as.Date("1990-01-01"),
+  to = as.Date("2022-12-31")
+) %>% 
+  .[, Dividend := round(Dividend, digits = 4)]
+```
+
+## Dividend payments
+
+:::topic
+Select the most recent dividend payment.
+:::
+
+```{r}
+#| tbl-cap: Most recent posted dividend payments
+
+dividends_latest_dt <- dividends_dt[, .SD[.N], by = Symbol][order(-Dividend)]
+
+RplotterPkg::create_table(
+  x = dividends_latest_dt[1:6,],
+  container_width_px = 400
+) 
+```
+
+:::topic
+Get the last posted dividends in 2022.
+:::
+
+```{r}
+#| tbl-cap: Last posted dividends in 2022 (25 x 5)
+
+dividends_last_2022_dt <- dividends_dt[Date > as.Date("2021-12-31"),.SD[.N], by = Symbol][order(-Dividend)]
+
+RplotterPkg::create_table(
+  x = dividends_last_2022_dt[1:6,],
+  container_width_px = 400
+)
+```
+
+We have 25 companies that posted dividends in the year 2022.
+
+:::topic
+Plot the dividends last posted in 2022
+:::
+
+```{r}
+#| fig-cap: Last Dividends Paid in 2022 by Top 25 DOW30 Companies
+
+RplotterPkg::create_scatter_plot(
+  df = dividends_last_2022_dt,
+  aes_x = "Date",
+  aes_y = "Dividend",
+  aes_label = "Symbol",
+  aes_label_size = 4,
+  x_title = "Month",
+  y_title = "Dividends($)",
+  x_limits = as.Date(c("2022-10-01", "2022-12-31")),
+  x_major_breaks = seq(as.Date("2022-10-01"), as.Date("2022-12-31"), by="1 week"),
+  x_date_labels = "%b %d",
+  rot_y_tic_label = T,
+  y_limits = c(0.0, 2.7),
+  y_major_breaks = seq(0.0,2.7,0.3),
+  pts_size = 1.2,
+  pts_color = "blue",
+  pts_fill = "blue",
+  show_minor_grids = F
+)
+```
+
+## Compute the Total Annual Yield for 2022
+
+The Total Annual Yield (TAY) is defined as the sum of total dividends in 2022 divided by the closing price on the first dividend date.
+
+Find the first dividend for each company in 2022.
+```{r}
+first_dividend_2022_dt <- dividends_dt[Date > as.Date("2021-12-31"), .SD[1L], by = Symbol][order(-Dividend)] %>% 
+  data.table::setnames(old = "Dividend", new = "FirstDiv")
+```
+
+Find the sum of the total dividends in 2022.
+```{r}
+sum_dividend_2022_dt <- dividends_dt[Date > as.Date("2021-12-31"), lapply(.SD, sum), by = Symbol, .SDcols = "Dividend"][order(-Dividend)] %>% 
+.[, .(Symbol, TotalDiv = Dividend)]
+```
+
+Outer join both the "first" and "sum" data.tables.
+```{r}
+data.table::setkey(first_dividend_2022_dt, "Symbol")
+data.table::setkey(sum_dividend_2022_dt, "Symbol")
+tay_dividend_2022_dt <- first_dividend_2022_dt[sum_dividend_2022_dt]
+```
+
+Get the daily closing prices for the 25 companies.
+```{r}
+prices_dt <- RstocksPkg::get_stock_prices(
+  symbols = tay_dividend_2022_dt$Symbol,
+  periodicity = "daily",
+  from = "2022-01-01",
+  to = "2022-03-30"
+) %>% 
+  .[, .(Symbol, Date, Close)]
+```
+
+Outer join the closing prices with the `tay_dividends_2022_dt`.
+```{r}
+data.table::setkeyv(tay_dividend_2022_dt, cols = c("Symbol","Date"))
+data.table::setkeyv(prices_dt, cols = c("Symbol","Date"))
+tay_dividend_prices_dt <- prices_dt[tay_dividend_2022_dt]
+```
+
+Compute `TAY = (TotalDiv/Close) * 100`.
+```{r}
+tay_dividend_prices_dt <- tay_dividend_prices_dt[, TAY := (TotalDiv/Close)*100] %>% 
+.[order(-TAY)]
+```
+
+Plot the TAY.
+```{r}
+#| fig-cap: Total Annual Yield(TAY) of Dividends of top companies in 2022
+
+RplotterPkg::create_scatter_plot(
+  df = tay_dividend_prices_dt,
+  aes_x = "Date",
+  aes_y = "TAY",
+  aes_label = "Symbol",
+  aes_label_size = 4,
+  x_title = "Month",
+  y_title = "Yield(%)",
+  x_limits = as.Date(c("2022-01-01", "2022-04-01")),
+  x_major_breaks = seq(as.Date("2022-01-01"), as.Date("2022-04-01"), by="1 month"),
+  x_date_labels = "%b",
+  rot_y_tic_label = TRUE,
+  y_limits = c(0.0, 6.0),
+  y_major_breaks = seq(0.0,6.0,0.5),
+  pts_size = 1.2,
+  pts_color = "blue",
+  pts_fill = "blue",
+  show_minor_grids = F
+)
+```
+
+## Dividends across the years
+
+Add a *year* variable to `dividends_dt`.
+```{r}
+dividends_dt[, Year := as.numeric(format(Date, "%Y"))]
+```
+
+Compute the total yearly dividend payout for each company each year.
+```{r}
+dividends_yearly_dt <- dividends_dt[, lapply(.SD, sum), by = .(Symbol, Year),.SDcols = "Dividend"] %>%        data.table::setnames(old = "Dividend", new = "TotalDiv")
+```
+
+Create a column that shows increase/decrease from the previous year.
+```{r}
+dividends_yearly_dt <- dividends_yearly_dt[, DivIncrease := ifelse(TotalDiv > shift(TotalDiv,1), 1, 0)] %>% 
+  na.omit(cols = "DivIncrease")
+```
+
+Get the total increases for each company.
+```{r}
+dividend_increases_dt = dividends_yearly_dt[, lapply(.SD, sum), by = Symbol, .SDcols = "DivIncrease"] %>% 
+  data.table::setnames(old = "DivIncrease", new = "DivIncreaseTotal") %>% 
+  .[order(-DivIncreaseTotal)]
+```
+
+Plot the increases.
+```{r}
+#| fig-cap: Total increases for each company
+#| fig-width: 12
+
+RplotterPkg::create_bar_plot(
+  df = dividend_increases_dt,
+  aes_x = "Symbol",
+  aes_y = "DivIncreaseTotal",
+  do_coord_flip = T,
+  rot_y_tic_label = T,
+  y_title = "Years of Increase",
+  order_bars = "asc",
+  bar_fill = "green",
+  bar_alpha = 0.6
+)
+```

@@ -1,0 +1,301 @@
+---
+title: "Graphing a Handful of Vanguard Funds"
+author: "Rick Dean"
+format: 
+  html:
+    toc: false
+    toc-depth: 4
+    toc-location: "right"
+    number-sections: true
+    number-offset: 0
+    self-contained: true
+    smooth-scroll: true
+    code-fold: true
+    code-block-bg: "#f1f3f5"
+    code-block-border-left: "#31BAE9"
+    code-overflow: wrap
+    tbl-cap-location: "bottom"
+    fig-width: 12
+    fig-height: 6
+    fig-align: "center"
+    fig-cap-location: "bottom"
+    css: ../style.css
+    link-external-newwindow: true
+    abstract-title: "Abstract"
+    abstract: "Taking a handful of Vanguard mutual index funds, perform data wrangling and graphing of adjusted closing prices using the R language."
+---
+
+```{r}
+#| warning: false
+#| message: false
+
+library(data.table)
+library(ggplot2)
+library(quantmod)
+library(magrittr)
+library(purrr)
+library(RplotterPkg)
+library(RstocksPkg)
+```
+
+# Graphing a Handful of Vanguard Funds
+
+## Vanguard Index Fund Closing Prices
+
+:::topic
+Select the Vanguard index funds.
+:::
+
+The following funds are selected for graphing.
+
+* Bonds:
+    + [VBILX](https://investor.vanguard.com/investment-products/mutual-funds/profile/vbilx) -- Inter-Term Bond Index Fund Admiral Shares
+    + [VBIRX](https://investor.vanguard.com/investment-products/mutual-funds/profile/vbirx) -- Vanguard Short-Term Bond Index Fund Admiral Shares
+
+* Growth:
+    + [VIMAX](https://investor.vanguard.com/investment-products/mutual-funds/profile/vimax) -- Vanguard Mid-Cap Index Fund Admiral Shares
+    + [VFIAX](https://investor.vanguard.com/investment-products/mutual-funds/profile/vfiax) -- Vanguard 500 Index Fund Admiral Shares
+    + [VIGAX](https://investor.vanguard.com/investment-products/mutual-funds/profile/vigax) -- Vanguard Growth Index Fund Admiral Shares
+    + [VTSAX](https://investor.vanguard.com/investment-products/mutual-funds/profile/vtsax) -- Vanguard Total Stock Market Index Fund Admiral Shares
+
+* Balanced-Income-Value:
+    + [VWELX](https://investor.vanguard.com/investment-products/mutual-funds/profile/vwelx) -- Vanguard Wellington Fund Investor Shares
+    + [VWINX](https://investor.vanguard.com/investment-products/mutual-funds/profile/vwinx) -- Vanguard Wellesley Income Fund Investor Shares
+    + [VVIAX](https://investor.vanguard.com/investment-products/mutual-funds/profile/vviax) -- Vanguard Value Index Fund Admiral Shares
+
+* Sector-Foreign:
+    + [VGSLX](https://investor.vanguard.com/investment-products/mutual-funds/profile/vgslx) -- Vanguard Real Estate Index Fund Admiral Shares
+    + [VGHCX](https://investor.vanguard.com/investment-products/mutual-funds/profile/vghcx) -- Vanguard Health Care Fund Investor Shares
+    + [VFWAX](https://investor.vanguard.com/investment-products/mutual-funds/profile/vfwax) -- Vanguard FTSE All-World ex-US Index Fund Admiral Shares
+
+:::topic
+Show the fund symbols and define start/end times of interest.
+:::
+
+Create named vectors of fund symbols and start/end times:
+
+```{r}
+symbols_v <- c(
+  VBILX = "Inter-term Bond Index Adm-R",
+  VIMAX = "Mid-Cap Index Fund Adm-R",
+  VFIAX = "500 Index Fund Adm-R",
+  VIGAX = "Growth Index Fund Adm-R",
+  VTSAX = "Total Stock Market Index Adm-R",
+  VVIAX = "Value Index Fund Adm-R",
+  VGSLX = "Real Estate Index Fund-RN",
+  VWELX = "Wellington Fund Inv",
+  VFWAX = "FTSE All World ex-US Adm",
+  VGHCX = "Health Care Fund Inv",
+  VBIRX = "Short-Term Bond Index Adm-N",
+  VWINX = "Wellesley Income Fund Inv-RN"
+)
+
+times_v <- c(
+  start = "2019-01-01",
+  end = "2022-12-31"
+)
+```
+
+:::topic
+Get the historic closing prices for all the funds.
+:::
+
+```{r}
+#| warning: false
+
+fund_prices_dt <- RstocksPkg::get_stock_prices(
+  symbols = names(symbols_v),
+  from = times_v[["start"]],
+  to = times_v[["end"]],
+  periodicity = "weekly",
+  warnings = FALSE
+)
+```
+
+## Growth Plots
+
+:::topic
+Define the `data.table` for growth funds.
+:::
+
+```{r}
+growth_symbols_v <- c(
+  VIMAX = "Mid-Cap Index Fund Adm-R",
+  VFIAX = "500 Index Fund Adm-R",
+  VIGAX = "Growth Index Fund Adm-R",
+  VTSAX = "Total Stock Market Index Adm-R"
+)
+growth_dt <- fund_prices_dt[Symbol %in% names(growth_symbols_v),]
+```
+
+```{r}
+#| fig-height: 7
+#| fig-width: 12
+#| fig-cap: Standardized adjusted closing prices for Vanguard Growth Index Funds
+
+build_plot <- function(id, dt, symbols, show_x, show_y){
+  symbol <- names(symbols)[[id]]
+  plot_dt <- dt[Symbol == symbol, ]
+  a_mean <- mean(plot_dt$Adjusted)
+  a_sd <- sd(plot_dt$Adjusted)
+  plot_dt[, Z := (Adjusted-a_mean)/a_sd]
+  
+  hide_x_tics <- TRUE
+  hide_y_tics <- TRUE
+  if(id %in% show_x){
+    hide_x_tics <- FALSE
+  }
+  if(id %in% show_y){
+    hide_y_tics <- FALSE
+  }
+  
+  RplotterPkg::create_scatter_plot(
+    df = plot_dt,
+    aes_x = "Date",
+    aes_y = "Z",
+    subtitle = symbols[[id]],
+    y_limits = c(-3, 3),
+    y_major_breaks = seq(-3, 3, 1.0),
+    hide_x_tics = hide_x_tics,
+    hide_y_tics = hide_y_tics,
+    connect = TRUE,
+    show_minor_grids = FALSE,
+    show_pts = FALSE
+  )
+}
+
+growth_plots_lst <- purrr::map(
+  1:4, 
+  build_plot, 
+  dt = growth_dt, 
+  symbols = growth_symbols_v,
+  show_x = c(3, 4),
+  show_y = c(1, 3)
+)
+
+layout <- list(
+  plots = growth_plots_lst,
+  rows = c(1, 1, 2, 2),
+  cols = c(1, 2, 1, 2)
+)
+
+RplotterPkg::multi_panel_grid(
+  layout = layout,
+  row_heights = c(8, 8.5),
+  col_widths = c(10.5,10)
+)
+```
+
+## Balanced-Income-Value Plots
+
+```{r}
+balanced_symbols_v <- c(
+  VWELX = "Wellington Fund Inv",
+  VWINX = "Wellesley Income Fund Inv-RN",
+  VVIAX = "Value Index Fund Adm-R"
+)
+balanced_dt <- fund_prices_dt[Symbol %in% names(balanced_symbols_v),]
+```
+
+```{r}
+#| fig-height: 7
+#| fig-width: 12
+#| fig-cap: Standardized adjusted closing prices for Vanguard Balanced/Income/Value Index Funds
+
+balanced_plots_lst <- purrr::map(
+  1:3, 
+  build_plot, 
+  dt = balanced_dt, 
+  symbols = balanced_symbols_v,
+  show_x = c(2, 3),
+  show_y = c(1, 3)
+)
+
+layout <- list(
+  plots = balanced_plots_lst,
+  rows = c(1, 1, 2),
+  cols = c(1, 2, 1)
+)
+
+RplotterPkg::multi_panel_grid(
+  layout = layout,
+  row_heights = c(8, 8.5),
+  col_widths = c(10.5,10)
+)
+```
+
+## Bonds Plots
+
+```{r}
+bond_symbols_v <- c(
+  VBILX = "Inter-term Bond Index Adm-R",
+  VBIRX = "Short-Term Bond Index Adm-N"
+)
+bond_dt <- fund_prices_dt[Symbol %in% names(bond_symbols_v),]
+```
+
+
+```{r}
+#| fig-height: 6
+#| fig-width: 12
+#| fig-cap: Standardized adjusted closing prices for Vanguard Bond Index Funds
+
+bond_plots_lst <- purrr::map(
+  1:2, 
+  build_plot, 
+  dt = bond_dt, 
+  symbols = bond_symbols_v,
+  show_x = c(1, 2),
+  show_y = 1
+)
+
+layout <- list(
+  plots = bond_plots_lst,
+  rows = c(1, 1),
+  cols = c(1, 2)
+)
+
+RplotterPkg::multi_panel_grid(
+  layout = layout,
+  row_heights = c(8, 8.5),
+  col_widths = c(10.5,10)
+)
+```
+
+## Sector-Foreign Plots
+
+```{r}
+sector_symbols_v <- c(
+  VGSLX = "Real Estate Index Fund-RN",
+  VGHCX = "Health Care Fund Inv",
+  VFWAX = "FTSE All World ex-US Adm"
+)
+sector_dt <- fund_prices_dt[Symbol %in% names(sector_symbols_v),]
+```
+
+```{r}
+#| fig-height: 7
+#| fig-width: 12
+#| fig-cap: Standardized adjusted closing prices for Vanguard Sector/Foreign Index Funds
+
+sector_plots_lst <- purrr::map(
+  1:3, 
+  build_plot, 
+  dt = sector_dt, 
+  symbols = sector_symbols_v,
+  show_x = c(2, 3),
+  show_y = c(1, 3)
+)
+
+layout <- list(
+  plots = sector_plots_lst,
+  rows = c(1, 1, 2),
+  cols = c(1, 2, 1)
+)
+
+RplotterPkg::multi_panel_grid(
+  layout = layout,
+  row_heights = c(8, 8.5),
+  col_widths = c(10.5,10)
+)
+```

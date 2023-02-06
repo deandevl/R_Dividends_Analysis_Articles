@@ -1,0 +1,228 @@
+---
+title: "Tech Dividends, Part 1"
+author: "Rick Dean"
+format: 
+  html:
+    toc: false
+    toc-depth: 4
+    toc-location: "right"
+    number-sections: true
+    number-offset: 0
+    self-contained: true
+    smooth-scroll: true
+    code-fold: true
+    code-block-bg: "#f1f3f5"
+    code-block-border-left: "#31BAE9"
+    code-overflow: wrap
+    tbl-cap-location: "bottom"
+    fig-width: 12
+    fig-height: 6
+    fig-align: "center"
+    fig-cap-location: "bottom"
+    css: ../style.css
+    link-external-newwindow: true
+    abstract-title: "Abstract"
+    abstract: "The following notes/R scripts were inspired from an article [Tech Dividends, Part 1](https://rviews.rstudio.com/2019/08/07/tech-dividends-part1/) by Jonathan Regenstein."
+---
+
+```{r}
+#| warning: false
+#| message: false
+
+library(data.table)
+library(ggplot2)
+library(here)
+library(magrittr)
+library(quantmod)
+library(RplotterPkg)
+library(RstocksPkg)
+```
+
+::: note
+Note: Be aware that this application has an internet request for dividend data that will take time to complete.
+:::
+
+# Tech Dividends, Part 1
+
+## The data.
+
+:::topic
+NASDAQ company symbols
+:::
+
+Read the symbols of NASDAQ companies with market cap greater than $10B.  The source is
+[Stock Screener](https://www.nasdaq.com/market-activity/stocks/screener). We only want companies 
+that have IPO'ed greater than 2007.
+
+```{r}
+symbols_file_path <- file.path(here::here(), "data", "nasdaq_mega_large_medium_small.csv")
+nasdaq_symbols_dt <- data.table::fread(symbols_file_path) %>% 
+  .[, .(Symbol, Name, `IPO Year`, `Market Cap`, Sector)] %>% 
+  .[`IPO Year` > 2007,] %>% 
+  .[order(-`Market Cap`)]
+```
+
+
+:::topic
+Dividend prices for companies over the last 10 years.
+:::
+
+We want to get dividend history for the top 100 NASDAQ companies based on "Market Cap".
+```{r}
+#| warning: false
+
+top_nasdaq_symbols <- nasdaq_symbols_dt$Symbol[1:100]
+nasdaq_dividends_dt <- RstocksPkg::get_dividends(
+  symbols = top_nasdaq_symbols,
+  from = "2013-01-01",
+  to = "2022-12-31"
+) %>% 
+  na.omit()
+```
+
+Add a *year* variable to our dividends data.table.
+```{r}
+#| fig-cap: Format of current data.table with 491 NASDAQ observations posting dividends
+
+nasdaq_dividends_dt[, Year := as.numeric(format(Date, "%Y"))]
+RplotterPkg::create_table(
+  x = nasdaq_dividends_dt[1:6,],
+  container_width_px = 400
+)
+```
+
+## First date when the companies posted a dividend.
+
+Get the first observation from each *Symbol* grouping where a dividend was posted.
+
+```{r}
+#| tbl-cap: First Posted Dividend Dates for Top NASDAQ Companies(21 x 4)
+
+first_dividend_dt <- nasdaq_dividends_dt[, .SD[1L], by = Symbol]
+
+RplotterPkg::create_table(
+  x = first_dividend_dt[1:6,],
+  container_width_px = 400
+)
+```
+
+We have a total of 21 companies with their first dividend posting dates.
+
+## Count for each year when a company first granted a dividend.
+
+```{r}
+#| tbl-cap: Yearly number of companies that granted a dividend (8 x 2)
+
+first_dividends_year_count_dt <- first_dividend_dt[, .N, by = Year][order(Year)]
+
+RplotterPkg::create_table(
+  x = first_dividends_year_count_dt,
+  container_width_px = 200
+)
+```
+
+## Most recent posting in each company.
+
+Get the most recent dividend from each company:
+
+```{r}
+#| tbl-cap: Most recent posting of dividends in each company(21 x 4)
+
+latest_dividends_dt <- nasdaq_dividends_dt[, .SD[.N], by = Symbol][order(-Dividend)]
+
+RplotterPkg::create_table(
+  x = latest_dividends_dt,
+  container_width_px = 400
+)
+```
+
+Plot the most recent dividends posted in 2022.
+
+```{r}
+#| warning: false
+#| fig-cap: Last Dividends Paid by NASDAQ Companies in year 2022
+
+RplotterPkg::create_scatter_plot(
+  df = latest_dividends_dt,
+  aes_x = "Date",
+  aes_y = "Dividend",
+  aes_label = "Symbol",
+  aes_label_size = 3,
+  x_title = "Week (2022)",
+  y_title = "Dividends($)",
+  rot_y_tic_label = TRUE,
+  x_limits = c(as.Date("2022-11-01"), as.Date("2022-12-31")),
+  x_major_date_breaks = "1 week",
+  x_date_labels = "%b%e",
+  y_limits = c(0.0, 5.0),
+  y_major_breaks = seq(0.0, 5.0, 1.0),
+  pts_size = 1.2,
+  pts_color = "blue",
+  pts_fill = "blue",
+  show_minor_grids = F
+)
+```
+
+## Plot all the dividends posted by each company
+
+The above data.table *nasdaq_dividends_dt* has 491 observations from the top 100 NASDAQ companies from 2013-01-01 to 2022-12-31. Create a scatter plot of all these companies. 
+
+```{r}
+#| fig-cap: All Dividends Paid by NASDAQ Companies from 2013-01-01 to 2022-12-31
+
+RplotterPkg::create_scatter_plot(
+  df = nasdaq_dividends_dt,
+  aes_x = "Date",
+  aes_y = "Dividend",
+  aes_fill = "Symbol",
+  x_title = "Year",
+  y_title = "Dividends($)",
+  rot_y_tic_label = TRUE,
+  x_limits = c(as.Date("2013-01-01"), as.Date("2022-12-31")),
+  x_major_date_breaks = "1 year",
+  x_date_labels = "%Y",
+  y_limits = c(0.0, 5.5),
+  y_major_breaks = seq(0.0,5.5,0.5),
+  pts_size = 1.2,
+  show_minor_grids = F,
+  show_legend = F
+) 
+```
+
+## Grouped statistical summaries
+
+:::topic
+Dividend stats by company
+:::
+
+Compute descriptive statistics on *Dividend* for the 21 top companies from *nasdaq_dividends_dt*. 
+
+```{r}
+#| tbl-cap: Dividend Statistics for top NASDAQ Companies (21 x 7)
+
+stats_comp_dividends_dt <- nasdaq_dividends_dt[, .(N = .N, Mean = mean(Dividend), Median = median(Dividend),  Min = min(Dividend), Max = max(Dividend), Total = sum(Dividend)), by = Symbol][order(-Total)]
+
+RplotterPkg::create_table(
+  x = stats_comp_dividends_dt,
+  container_width_px = 600
+)
+```
+
+This is an interesting table where for example we can see that the ticker "AGNC" posted dividends 107 times with an average amount of 0.21 and a total of 22.55 over the 2013 to 2022 time frame.
+
+:::topic
+Dividend stats by year
+:::
+
+```{r}
+#| tbl-cap:  Dividend Statistics across the years for top NASDAQ Companies (7 x 7)
+
+stats_year_dividends_dt <- nasdaq_dividends_dt[, .(N = .N, Mean = mean(Dividend), Median = median(Dividend), Min = min(Dividend), Max = max(Dividend), Total = sum(Dividend)), by = Year][order(Year)]
+
+RplotterPkg::create_table(
+  x = stats_year_dividends_dt,
+  container_width_px = 600
+)
+```
+
+Evidently 2022 was a good year for dividends where if we held the 21 companies, then we would receive a total of 84 postings for a total of $49.18.

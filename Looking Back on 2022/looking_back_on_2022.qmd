@@ -1,0 +1,295 @@
+---
+title: "Looking Back on 2022"
+author: "Rick Dean"
+format: 
+  html:
+    toc: false
+    toc-depth: 4
+    toc-location: "right"
+    number-sections: true
+    number-offset: 0
+    self-contained: true
+    smooth-scroll: true
+    code-fold: true
+    code-block-bg: "#f1f3f5"
+    code-block-border-left: "#31BAE9"
+    code-overflow: wrap
+    tbl-cap-location: "bottom"
+    fig-width: 12
+    fig-height: 6
+    fig-align: "center"
+    fig-cap-location: "bottom"
+    css: ../style.css
+    link-external-newwindow: true
+    abstract-title: "Abstract"
+    abstract: "The following notes/R scripts were inspired from an article [Looking Back on 2018](http://www.reproduciblefinance.com/2019/01/14/looking-back-on-last-year/) by Jonathan Regenstein."
+---
+
+```{r}
+#| warning: false
+#| message: false
+
+library(data.table)
+library(magrittr)
+library(ggplot2)
+library(purrr)
+library(grid)
+library(gtable)
+library(quantmod)
+library(RplotterPkg)
+library(RstocksPkg)
+```
+
+# Looking Back on 2022
+
+## The data
+
+:::topic
+Get the daily prices.
+:::
+
+Name 10 sector Exchange-Traded Funds (ETF's i.e. sector indexes) plus the SP500 index (SPY) along with their corresponding sector labels.
+
+```{r}
+symbol_sector_dt <- data.table::data.table(
+  Symbol = c("XLY", "XLP", "XLE",
+          "XLF", "XLV", "XLI", "XLB",
+          "XLK", "XLU", "XLRE",
+          "SPY"),
+  Sector = c("Consumer Discretionary", "Consumer Staples", "Energy",
+          "Financials", "Health Care", "Industrials", "Materials",
+          "Information Technology", "Utilities", "Real Estate",
+          "Market")
+)
+```
+
+Get the daily prices for 2022 for the symbols:
+
+```{r}
+prices_dt <- RstocksPkg::get_stock_prices(
+  symbols = symbol_sector_dt$Symbol, 
+  from = "2021-12-31", 
+  to = "2022-12-31",
+  periodicity = "daily"
+  ) %>% 
+.[, .(Symbol, Date, Adjusted)]
+```
+
+Outer join both `ticker_sector_dt` and `prices_dt` using *Symbol* as the key.
+```{r}
+data.table::setkey(symbol_sector_dt, "Symbol")
+data.table::setkey(prices_dt, "Symbol")
+prices_dt <- prices_dt[symbol_sector_dt] %>% 
+.[, Sector := as.factor(Sector)]
+```
+
+:::topic
+Group by sector and show the first index
+:::
+
+```{r}
+#| tbl-cap: First sector prices at 2021-12-31 
+
+first_index_dt <- prices_dt[, .SD[1], by = Sector]
+
+RplotterPkg::create_table(
+  x = first_index_dt,
+  container_width_px = 400
+)
+```
+
+All showing the starting date of 2021-12-31
+
+:::topic
+Group by Sector and compute the daily return
+:::
+
+The *DailyReturn* column is the log10 difference between the current adjusted value and its prior daily adjusted value.
+
+```{r}
+prices_daily_return_dt <- prices_dt[, DailyReturn := log10(Adjusted) - log10(shift(Adjusted, 1)), by = Sector] %>% 
+na.omit(cols = "DailyReturn")
+```
+
+:::topic
+Tabulate the first *DailyReturn* of each sector group (2022-01-03)
+:::
+
+```{r}
+#| tbl-cap: First daily return for each sector
+
+prices_daily_return_1st_dt  <- prices_daily_return_dt[, .SD[1], by = Sector]
+
+RplotterPkg::create_table(
+  x = prices_daily_return_1st_dt,
+  container_width_px = 400
+)
+```
+
+:::topic
+Plot the *DailyReturn* across time for each sector group
+:::
+
+```{r}
+#| warning: false
+#| fig-cap: DailyReturn across time for each sector group in 2022
+
+build_plot <- function(id, dt, sectors){
+  sector <- sectors[[id]]
+  plot_dt <- dt[Sector == sector, ]
+  
+  hide_x_tics <- TRUE
+  if(id %in% c(8,9,10,11)){
+    hide_x_tics <- FALSE
+  }
+  
+  hide_y_tics <- TRUE
+  if(id %in% c(1,4,8)){
+    hide_y_tics <- FALSE
+  }
+  
+  a_plot <- RplotterPkg::create_stick_plot(
+    df = plot_dt,
+    aes_x = "Date",
+    aes_y = "DailyReturn",
+    subtitle = sector,
+    rot_y_tic_label = T,
+    x_limits = as.Date(c("2022-01-01", "2023-01-01")),
+    x_major_breaks = seq(as.Date("2022-01-01"), as.Date("2023-01-01"), by="2 month"),
+    x_date_labels = "%b",
+    y_limits = c(-0.03, 0.06),
+    y_major_breaks = seq(-0.03, 0.06, 0.03),
+    hide_x_tics = hide_x_tics,
+    hide_y_tics = hide_y_tics,
+    line_color = "purple",
+    line_alpha = 0.7
+  )
+  return(a_plot)
+}
+sectors <- symbol_sector_dt$Sector
+plots_lst <- purrr::map(1:11, build_plot, dt = prices_daily_return_dt, sectors = sectors)
+layout <- list(
+  plots = plots_lst,
+  rows = c(1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3),
+  cols = c(1, 2, 3, 1, 2, 3, 4, 1, 2, 3, 4)
+)
+multi_panel_grid(
+  layout = layout,
+  col_widths = c(6.8, 6, 6, 6),
+  row_heights = c(5, 5, 5.8)
+)
+```
+
+## Plot positive and negative prices
+
+Create two numeric variables *ReturnPos* and *ReturnNeg*.
+
+```{r}
+#| tbl-cap: ReturnPos and ReturnNeg columns based on DailyReturn value 
+
+prices_pos_neg_dt <- prices_daily_return_dt[, .(Sector, Date, DailyReturn, ReturnPos = ifelse(DailyReturn > 0, DailyReturn, 0.0), ReturnNeg = ifelse(DailyReturn < 0, DailyReturn, 0.0))]
+
+RplotterPkg::create_table(
+  x = prices_pos_neg_dt[1:6,],
+  container_width_px = 400
+)
+```
+
+Create a "long" dataframe by reshaping `prices_pos_neg_dt`involving variables *ReturnPos* and *ReturnNeg*.
+
+```{r}
+pos_neg_long_dt <- data.table::melt(prices_pos_neg_dt, 
+                      id.vars = c("Sector","Date"), 
+                      measure.vars = c("ReturnPos", "ReturnNeg"), 
+                      variable.name = "Direction", value.name = "DailyReturn")
+```
+
+Plot the two directions across sectors.
+
+```{r}
+#| warning: false
+#| fig-cap: 2022 Net Daily Returns
+
+build_plot <- function(id, dt, sectors){
+  sector <- sectors[[id]]
+  plot_dt <- dt[Sector == sector, ]
+  
+  hide_x_tics <- TRUE
+  if(id %in% c(8,9,10,11)){
+    hide_x_tics <- FALSE
+  }
+  
+  hide_y_tics <- TRUE
+  if(id %in% c(1,4,8)){
+    hide_y_tics <- FALSE
+  }
+  
+  a_plot <- RplotterPkg::create_stick_plot(
+    df = plot_dt,
+    aes_x = "Date",
+    aes_y = "DailyReturn",
+    aes_color = "Direction",
+    subtitle = sector,
+    rot_y_tic_label = T,
+    x_limits = as.Date(c("2022-01-01", "2023-01-01")),
+    x_major_breaks = seq(as.Date("2022-01-01"), as.Date("2023-01-01"), by="2 month"),
+    x_date_labels = "%b",
+    y_limits = c(-0.03, 0.06),
+    y_major_breaks = seq(-0.03, 0.06, 0.03),
+    hide_x_tics = hide_x_tics,
+    hide_y_tics = hide_y_tics,
+    show_legend = FALSE
+  ) + 
+    ggplot2::scale_color_manual(
+      values = c("green","red")
+    )
+  
+  return(a_plot)
+}
+sectors <- symbol_sector_dt$Sector
+plots_lst <- purrr::map(1:11, build_plot, dt = pos_neg_long_dt, sectors = sectors)
+layout <- list(
+  plots = plots_lst,
+  rows = c(1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3),
+  cols = c(1, 2, 3, 1, 2, 3, 4, 1, 2, 3, 4)
+)
+multi_panel_grid(
+  layout = layout,
+  col_widths = c(6.8, 6, 6, 6),
+  row_heights = c(5,5,5.8)
+)
+```
+
+## Plot Information Technology
+
+Plot just the "Information Technology" returns with the major time tics showing the location of each quarter.
+
+Filter out "Information Technology" sector.
+
+```{r}
+info_tech_dt <- pos_neg_long_dt[Sector == "Information Technology"]
+```
+
+Plot the positive and negative:
+
+```{r}
+#| warning: false
+#| fig-cap: 2022 Information Tech Net Daily Returns
+
+RplotterPkg::create_stick_plot(
+  df = info_tech_dt,
+  aes_x = "Date",
+  aes_y = "DailyReturn",
+  aes_color = "Direction",
+  rot_y_tic_label = T,
+  x_limits = as.Date(c("2022-01-01", "2023-01-01")),
+  x_major_breaks = seq(as.Date("2022-01-01"), as.Date("2023-01-01"), by="1 month"),
+  x_date_labels = "%b",
+  y_limits = c(-0.03, 0.06),
+  y_major_breaks = seq(-0.03, 0.06, 0.03),
+  show_legend = F
+) + 
+  ggplot2::scale_color_manual(
+    values = c("green","red")
+  )
+```
